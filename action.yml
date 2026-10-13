@@ -1,0 +1,20 @@
+name: agentlint
+description: Lint an AI agent config and score its governance (AGENT Framework, Governance pillar).
+author: Greg Lucas
+inputs:
+  config:
+    description: Path to the agent config file to audit.
+    required: true
+  min-score:
+    description: Fail the job if the Agent Governance Score is below this number.
+    required: false
+    default: "50"
+runs:
+  using: composite
+  steps:
+    - name: Run agentlint
+      shell: bash
+      run: python3 "${{ github.action_path }}/agentlint.py" --min-score "${{ inputs.min-score }}" "${{ inputs.config }}"
+branding:
+  icon: shield
+  color: purple
