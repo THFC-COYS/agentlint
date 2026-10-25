@@ -60,8 +60,9 @@ python3 agentlint.py --json demo/good-agent.json   # machine-readable report
 
 | Check | Points | What it catches |
 | --- | ---: | --- |
-| Tool permissions scoped | 15 | Wildcard (`"*"`) or all-tools grants |
-| Destructive actions gated by human approval | 20 | Shell, delete, payments, outbound send, or deploy tools with no approval gate |
+| Tool permissions scoped | 10 | Wildcard (`"*"`) or all-tools grants |
+| Destructive actions gated by human approval | 15 | Shell, delete, payments, outbound send, or deploy tools with no approval gate |
+| Consequential actions have a hard approval floor | 10 | Send, pay, delete, or publish class tools that do not declare `requires_approval` on the tool itself; a global approval flag does not satisfy the floor |
 | No secrets embedded in config | 15 | API keys and credentials hardcoded in config or prompt text |
 | Autonomy bounded | 10 | No max steps / iteration cap, so the agent can loop forever |
 | Audit logging enabled | 10 | Logging missing or explicitly disabled |
