@@ -169,6 +169,28 @@ def destructive_tools(tools):
     return hits
 
 
+# Consequential classes for the hard approval floor. Deliberately broader
+# than DESTRUCTIVE_PATTERNS: bare verbs count too (a tool named "send",
+# "post_update", or "pay_invoice" is consequential even though the
+# destructive check's narrower patterns would miss it).
+FLOOR_PATTERNS = [
+    (r"send|post", "outbound send/post"),
+    (r"pay|charge|refund|transfer", "money movement"),
+    (r"delete|remove", "deletion"),
+    (r"publish|deploy", "publish/deploy"),
+]
+
+
+def floor_tools(tools):
+    hits = []
+    for tool in tools:
+        for pattern, label in FLOOR_PATTERNS:
+            if re.search(pattern, tool["name"].lower()):
+                hits.append((tool, label))
+                break
+    return hits
+
+
 # ---------------------------------------------------------------------------
 # Signal extraction: normalize JSON dicts and raw text into one shape.
 # ---------------------------------------------------------------------------
@@ -280,7 +302,7 @@ def find_secrets(text):
 
 
 # ---------------------------------------------------------------------------
-# The eight governance checks. Each returns (status, points, message).
+# The nine governance checks. Each returns (status, points, message).
 # ---------------------------------------------------------------------------
 
 def check_tool_scope(s):
@@ -289,14 +311,14 @@ def check_tool_scope(s):
                 "Wildcard grant: tools includes \"*\", so the agent can "
                 "use every tool that exists now or gets added later.")
     if not s["tools_declared"]:
-        return ("WARN", 7,
+        return ("WARN", 5,
                 "No tool list declared. The agent's scope cannot be "
                 "verified, which is its own risk.")
     if len(s["tools"]) > 20:
-        return ("WARN", 7,
+        return ("WARN", 5,
                 "Very broad tool surface: %d tools declared. Every tool "
                 "is attack surface." % len(s["tools"]))
-    return ("PASS", 15,
+    return ("PASS", 10,
             "Tools are an explicit list of %d. No wildcard grants."
             % len(s["tools"]))
 
@@ -311,21 +333,60 @@ def check_destructive_gates(s):
                 "payments, outbound send, or deploy tools).")
     labels = sorted(set(label for _, label in hits))
     if s["approval_global"]:
-        return ("PASS", 20,
+        return ("PASS", 15,
                 "Destructive capabilities present (%s) but a human "
                 "approval gate is configured." % ", ".join(labels))
     ungated = [t for t, _ in hits if not t["gated"]]
     if hits and not ungated:
-        return ("PASS", 20,
+        return ("PASS", 15,
                 "Every destructive tool (%s) is individually marked as "
                 "requiring approval." % ", ".join(labels))
     if s["approval_anywhere"]:
-        return ("WARN", 10,
+        return ("WARN", 7,
                 "Some approval config exists, but destructive tools "
                 "(%s) are not all clearly gated." % ", ".join(labels))
     return ("FAIL", 0,
             "Destructive capabilities (%s) with NO human approval gate. "
             "The agent can act on its own say-so." % ", ".join(labels))
+
+
+def check_approval_floor(s):
+    """Hard floor: a consequential tool must declare approval on itself.
+
+    The destructive-gates check accepts one global approval flag as
+    covering every tool. A floor is stricter: for send / pay / delete /
+    publish class tools, the approval requirement has to travel with the
+    tool, so no single global setting (and no caller claim about how safe
+    this particular call is) can waive it.
+    """
+    if s["wildcard"]:
+        return ("FAIL", 0,
+                "Wildcard grant: consequential tools (send, pay, delete, "
+                "publish classes) are implicitly included, and none of "
+                "them declares requires_approval. The floor cannot hold.")
+    hits = floor_tools(s["tools"])
+    if not hits:
+        return ("PASS", 10,
+                "No consequential tools declared (nothing in the send, "
+                "pay, delete, or publish classes), so no approval floor "
+                "is needed.")
+    names = sorted(set(t["name"] for t, _ in hits))
+    ungated = sorted(set(t["name"] for t, _ in hits if not t["gated"]))
+    if not ungated:
+        return ("PASS", 10,
+                "Every consequential tool (%s) declares requires_"
+                "approval itself. The floor is per tool, so it cannot "
+                "be waived by one global flag." % ", ".join(names))
+    if len(ungated) < len(names):
+        return ("WARN", 5,
+                "Some consequential tools declare requires_approval, "
+                "but %s do not. A hard floor has no exceptions."
+                % ", ".join(ungated))
+    return ("FAIL", 0,
+            "Consequential tools (%s) do not declare requires_approval "
+            "on the tool itself. A global approval flag is not a floor: "
+            "the requirement has to travel with the tool."
+            % ", ".join(names))
 
 
 def check_secrets(s):
@@ -404,9 +465,11 @@ def check_owner(s):
 
 
 CHECKS = [
-    ("Tool permissions scoped", 15, check_tool_scope),
-    ("Destructive actions gated by human approval", 20,
+    ("Tool permissions scoped", 10, check_tool_scope),
+    ("Destructive actions gated by human approval", 15,
      check_destructive_gates),
+    ("Consequential actions have a hard approval floor", 10,
+     check_approval_floor),
     ("No secrets embedded in config", 15, check_secrets),
     ("Autonomy bounded (max steps / iteration cap)", 10, check_autonomy),
     ("Audit logging enabled", 10, check_logging),
